@@ -17,7 +17,13 @@ import {
   getInput,
 } from "../internal/gamelogic/gamelogic.js";
 
-import { declareAndBind , SimpleQueueType } from "../internal/pubsub/consume.js";
+import { declareAndBind , SimpleQueueType  , subscribeMsgPack , AckType} from "../internal/pubsub/consume.js";
+
+import {
+  writeLog,
+  type GameLog,
+} from "../internal/gamelogic/logs.js";
+
 
 async function main() {
   const rabbitConnString =
@@ -29,12 +35,24 @@ async function main() {
 
   const ch = await conn.createConfirmChannel();
 
-  await declareAndBind(
+  await subscribeMsgPack<GameLog>(
   conn,
   ExchangePerilTopic,
   GameLogSlug,
   `${GameLogSlug}.*`,
   SimpleQueueType.Durable,
+  async (gameLog: GameLog) => {
+    try {
+      await writeLog(gameLog);
+    } catch (err) {
+      console.error("Failed to write game log:", err);
+      process.stdout.write("> ");
+      return AckType.NackRequeue;
+    }
+
+    process.stdout.write("> ");
+    return AckType.Ack;
+  },
 );
 
 

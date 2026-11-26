@@ -31,6 +31,8 @@ import {
   WarRecognitionsPrefix,
 } from "../internal/routing/routing.js";
 
+import { publishGameLog } from "./index.js";
+
 export function handlerPause(
   gs: GameState,
 ): (ps: PlayingState) => AckType {
@@ -87,27 +89,52 @@ export function handlerMove(
 
 export function handlerWar(
   gs: GameState,
+  ch: ConfirmChannel,
 ): (rw: RecognitionOfWar) => Promise<AckType> {
   return async (rw: RecognitionOfWar) => {
     const resolution = handleWar(gs, rw);
 
-    process.stdout.write("> ");
+    let message: string;
 
     switch (resolution.result) {
       case WarOutcome.NotInvolved:
+        process.stdout.write("> ");
         return AckType.NackRequeue;
 
       case WarOutcome.NoUnits:
+        process.stdout.write("> ");
         return AckType.NackDiscard;
 
       case WarOutcome.OpponentWon:
       case WarOutcome.YouWon:
+        message =
+          `${resolution.winner} won a war against ${resolution.loser}`;
+        break;
+
       case WarOutcome.Draw:
-        return AckType.Ack;
+        message =
+          `A war between ${resolution.attacker} and ${resolution.defender} resulted in a draw`;
+        break;
 
       default:
         console.error("Unknown war outcome:", resolution);
+        process.stdout.write("> ");
         return AckType.NackDiscard;
     }
+
+    try {
+      await publishGameLog(
+        ch,
+        rw.attacker.username,
+        message,
+      );
+    } catch (err) {
+      console.error("Failed to publish game log:", err);
+      process.stdout.write("> ");
+      return AckType.NackRequeue;
+    }
+
+    process.stdout.write("> ");
+    return AckType.Ack;
   };
 }

@@ -1,6 +1,7 @@
 
 import type amqp from "amqplib";
 import type { Channel } from "amqplib";
+import {decode} from "@msgpack/msgpack"
 
 export enum SimpleQueueType {
   Durable,
@@ -37,24 +38,24 @@ export async function declareAndBind(
 }
 
 
-
-
-
-export async function subscribeJSON<T>(
+export async function subscribe<T>(
   conn: amqp.ChannelModel,
   exchange: string,
   queueName: string,
-  key: string,
-  queueType: SimpleQueueType,
+  routingKey: string,
+  simpleQueueType: SimpleQueueType,
   handler: (data: T) => Promise<AckType> | AckType,
+  deserializer: (data: Buffer) => T,
 ): Promise<void> {
   const [ch, queue] = await declareAndBind(
     conn,
     exchange,
     queueName,
-    key,
-    queueType,
+    routingKey,
+    simpleQueueType,
   );
+
+  await ch.prefetch(1);
 
   await ch.consume(
     queue.queue,
@@ -63,25 +64,20 @@ export async function subscribeJSON<T>(
         return;
       }
 
-      const data: T = JSON.parse(
-        message.content.toString(),
-      );
+      const data = deserializer(message.content);
 
       const ackType = await handler(data);
 
       switch (ackType) {
         case AckType.Ack:
-          console.log("Ack");
           ch.ack(message);
           break;
 
         case AckType.NackRequeue:
-          console.log("NackRequeue");
           ch.nack(message, false, true);
           break;
 
         case AckType.NackDiscard:
-          console.log("NackDiscard");
           ch.nack(message, false, false);
           break;
       }
@@ -89,4 +85,44 @@ export async function subscribeJSON<T>(
     { noAck: false },
   );
 }
+
+export async function subscribeJSON<T>(
+  conn: amqp.ChannelModel,
+  exchange: string,
+  queueName: string,
+  routingKey: string,
+  simpleQueueType: SimpleQueueType,
+  handler: (data: T) => Promise<AckType> | AckType,
+): Promise<void> {
+  await subscribe<T>(
+    conn,
+    exchange,
+    queueName,
+    routingKey,
+    simpleQueueType,
+    handler,
+    (data) => JSON.parse(data.toString()) as T,
+  );
+
+}
+
+export async function subscribeMsgPack<T>(
+  conn: amqp.ChannelModel,
+  exchange: string,
+  queueName: string,
+  routingKey: string,
+  simpleQueueType: SimpleQueueType,
+  handler: (data: T) => Promise<AckType> | AckType,
+): Promise<void> {
+  await subscribe<T>(
+    conn,
+    exchange,
+    queueName,
+    routingKey,
+    simpleQueueType,
+    handler,
+    (data) => decode(data) as T,
+  );
+}
+
 
